@@ -1,8 +1,9 @@
 mod protocol;
 mod error;
 
-use crate::protocol::{BatchConfig, BeatReply, BeatState, FailConfig, HelloConfig};
-use crate::error::{Result, Error};
+use crate::protocol::BeatReply;
+pub use crate::protocol::{BatchConfig, BeatState, FailConfig, HelloConfig};
+pub use crate::error::{Result, Error};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
