@@ -220,7 +220,7 @@ impl Connection {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Job {
     /// The job's unique identifier.
-    pub(crate) jid: String,
+    pub jid: String,
 
     /// The queue this job belongs to. Usually `default`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -228,10 +228,10 @@ pub struct Job {
 
     /// The job's type. Called `kind` because `type` is reserved.
     #[serde(rename = "jobtype")]
-    pub(crate) kind: String,
+    pub kind: String,
 
     /// The arguments provided for this job.
-    pub(crate) args: Vec<serde_json::Value>,
+    pub args: Vec<serde_json::Value>,
 
     /// When this job was created.
     // note that serializing works correctly here since the default chrono serialization
@@ -277,7 +277,7 @@ pub struct Job {
     ///
     /// This field is read-only.
     #[serde(skip_serializing)]
-    failure: Option<Failure>,
+    pub failure: Option<Failure>,
 
     /// Extra context to include with the job.
     ///
