@@ -1,10 +1,12 @@
-mod protocol;
 mod error;
+mod protocol;
+
+pub use crate::error::{Error, Result};
+pub use crate::protocol::{BatchConfig, BeatState, Config, FailConfig, Failure, HelloConfig, Job};
 
 use crate::protocol::BeatReply;
-pub use crate::protocol::{BatchConfig, BeatState, FailConfig, HelloConfig, Job, Failure, Config};
-pub use crate::error::{Result, Error};
 
+use std::borrow::Cow;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
@@ -58,9 +60,7 @@ impl Connection {
     pub async fn beat(&mut self) -> Result<BeatState> {
         self.send_command(
             "BEAT",
-            &[&serde_json::to_string(
-                &serde_json::json!({ "wid": self.config.worker_id }),
-            )?],
+            &[serde_json::to_string(&serde_json::json!({ "wid": self.config.worker_id }))?.into()],
         )
         .await?;
         match self.read_string().await?.as_deref() {
@@ -77,13 +77,13 @@ impl Connection {
     }
 
     pub async fn hello(&mut self, config: &HelloConfig) -> Result<()> {
-        self.send_command("HELLO", &[&serde_json::to_string(config)?])
+        self.send_command("HELLO", &[serde_json::to_string(config)?.into()])
             .await?;
         self.validate_response("OK").await?;
         Ok(())
     }
 
-    pub async fn fetch(&mut self, queues: &[&str]) -> Result<Option<Job>> {
+    pub async fn fetch(&mut self, queues: &[Cow<'_, str>]) -> Result<Option<Job>> {
         if queues.is_empty() {
             self.send_command("FETCH", &[]).await?;
         } else {
@@ -99,7 +99,7 @@ impl Connection {
     pub async fn ack(&mut self, jid: &str) -> Result<()> {
         self.send_command(
             "ACK",
-            &[&serde_json::to_string(&serde_json::json!({ "jid": jid }))?],
+            &[serde_json::to_string(&serde_json::json!({ "jid": jid }))?.into()],
         )
         .await?;
         self.validate_response("OK").await?;
@@ -107,33 +107,37 @@ impl Connection {
     }
 
     pub async fn fail(&mut self, config: &FailConfig) -> Result<()> {
-        self.send_command("FAIL", &[&serde_json::to_string(config)?])
+        self.send_command("FAIL", &[serde_json::to_string(config)?.into()])
             .await?;
         self.validate_response("OK").await?;
         Ok(())
     }
 
     pub async fn push(&mut self, job: &Job) -> Result<()> {
-        self.send_command("PUSH", &[&serde_json::to_string(job)?])
+        self.send_command("PUSH", &[serde_json::to_string(job)?.into()])
             .await?;
         self.validate_response("OK").await?;
         Ok(())
     }
 
     pub async fn batch_new(&mut self, config: &BatchConfig) -> Result<String> {
-        self.send_command("BATCH NEW", &[&serde_json::to_string(config)?])
+        self.send_command("BATCH NEW", &[serde_json::to_string(config)?.into()])
             .await?;
         self.read_string().await?.ok_or(Error::ReceivedEmptyMessage)
     }
 
     pub async fn batch_commit(&mut self, bid: &str) -> Result<()> {
-        self.send_command("BATCH COMMIT", &[bid]).await?;
+        self.send_command("BATCH COMMIT", &[bid.into()]).await?;
         self.validate_response("OK").await?;
         Ok(())
     }
 
-    async fn send_command<'a>(&'a mut self, key: &'static str, args: &'a [&'a str]) -> Result<()> {
-        let args: String = args.into_iter().map(|a| *a).collect::<Vec<&str>>().join(" ");
+    async fn send_command<'a>(
+        &'a mut self,
+        key: &'a str,
+        args: &'a [Cow<'a, str>],
+    ) -> Result<()> {
+        let args: String = args.join(" ");
         let mut args = vec![key.into(), args].join(" ");
         args.push_str("\r\n");
         self.writer.write_all(dbg!(&args).as_bytes()).await?;
