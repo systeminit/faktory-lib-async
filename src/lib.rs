@@ -1,3 +1,41 @@
+//! # `faktory-lib-async`
+//!
+//! Experimental tokio-based async primitives implementing the
+//! [Faktory Work Protocol](https://github.com/contribsys/faktory/blob/main/docs/protocol-specification.md)
+//! used for communicating with the [faktory job server](https://contribsys.com/faktory/).
+//!
+//!
+//! # Example
+//! ```rust
+//! use faktory_lib_async::{Config, Connection, Result as FaktoryResult};
+//! use std::borrow::Cow;
+//! use tokio::sync::watch;
+//!
+//! #[tokio::main]
+//! async fn main() -> FaktoryResult<()> {
+//!     let config = Config::from_uri(
+//!         "faktory-server:7419",
+//!         Some("worker-hostname".to_string()),
+//!         Some("worker-01".to_string()),
+//!     );
+//!
+//!     let queues = vec![Cow::from("default")];
+//!
+//!     while let Some(job) = connection.fetch(&queues).await? {
+//!         // do something with the job
+//!
+//!         // ack the job to ensure it isn't requeued by faktory
+//!         let _ = connection.ack(&job.jid).await?;
+//!     }
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! This library only implements the logic for sending and receiving messages from
+//! a faktory server and does not handle higher-level protocol details like responding
+//! to faktory requests to quiet or terminate.
+//!
 mod error;
 mod protocol;
 
@@ -11,6 +49,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 
+/// The connection to the faktory server
 #[derive(Debug)]
 pub struct Connection {
     config: Config,
@@ -35,7 +74,7 @@ impl Connection {
         Ok(conn)
     }
 
-    pub async fn default_hello(&mut self) -> Result<()> {
+    async fn default_hello(&mut self) -> Result<()> {
         // TODO: improve hello config usage
         let mut config = HelloConfig::default();
         config.pid = Some(std::process::id() as usize);
@@ -46,18 +85,24 @@ impl Connection {
         Ok(())
     }
 
+    /// Returns the last response to the BEAT command sent over this connection. Will be
+    /// `BeatState::Ok` until the first beat is sent.
     pub fn last_beat(&self) -> BeatState {
         self.last_beat
     }
 
+    /// Send the END message to the faktory server. Does not close the connection. The connection
+    /// to the server is closed when the `Connection` goes out of scope.
     pub async fn end(&mut self) -> Result<()> {
         self.send_command("END", &[]).await?;
         Ok(())
     }
 
-    // TODO: handle extra arguments: {wid: String, current_state: String, rss_kb: Integer}
-    // https://github.com/contribsys/faktory/blob/main/docs/protocol-specification.md#beat-command
+    /// Sends a BEAT message to the faktory server. Job consumers that do not send beat messages at
+    /// least every 60 seconds will be shutdown by remotely by the faktory server.
     pub async fn beat(&mut self) -> Result<BeatState> {
+        // TODO: handle extra arguments: {wid: String, current_state: String, rss_kb: Integer}
+        // https://github.com/contribsys/faktory/blob/main/docs/protocol-specification.md#beat-command
         self.send_command(
             "BEAT",
             &[serde_json::to_string(&serde_json::json!({ "wid": self.config.worker_id }))?.into()],
@@ -96,6 +141,8 @@ impl Connection {
             .transpose()?)
     }
 
+    /// ACK a Job. If a job succeeds, it must be ACK'ed or it will be given to another worker after
+    /// some time has passed.
     pub async fn ack(&mut self, jid: &str) -> Result<()> {
         self.send_command(
             "ACK",
@@ -106,6 +153,13 @@ impl Connection {
         Ok(())
     }
 
+    /// FAIL a Job, adding it back to the faktory queue.
+    ///
+    /// ```rust
+    /// connection.fail(&FailConfig::new("job-id".to_string(), "failed to execute that
+    /// job".to_string(), "unknown error", Some(vec!["backtrace lines".to_string()])));
+    /// ```
+    ///
     pub async fn fail(&mut self, config: &FailConfig) -> Result<()> {
         self.send_command("FAIL", &[serde_json::to_string(config)?.into()])
             .await?;
@@ -132,15 +186,11 @@ impl Connection {
         Ok(())
     }
 
-    async fn send_command<'a>(
-        &'a mut self,
-        key: &'a str,
-        args: &'a [Cow<'a, str>],
-    ) -> Result<()> {
+    async fn send_command<'a>(&'a mut self, key: &'a str, args: &'a [Cow<'a, str>]) -> Result<()> {
         let args: String = args.join(" ");
         let mut args = vec![key.into(), args].join(" ");
         args.push_str("\r\n");
-        self.writer.write_all(dbg!(&args).as_bytes()).await?;
+        self.writer.write_all(&args.as_bytes()).await?;
         Ok(())
     }
 
@@ -148,7 +198,7 @@ impl Connection {
         let mut output = String::new();
         self.reader.read_line(&mut output).await?;
 
-        if dbg!(&output).is_empty() {
+        if output.is_empty() {
             return Err(Error::ReceivedEmptyMessage);
         }
         if !output.ends_with("\r\n") {
@@ -193,14 +243,5 @@ impl Connection {
             return Err(Error::UnexpectedResponse(output, expected.to_owned()))?;
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
     }
 }
