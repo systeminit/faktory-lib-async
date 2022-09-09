@@ -140,7 +140,7 @@ impl Connection {
         let args: String = args.join(" ");
         let mut args = vec![key.into(), args].join(" ");
         args.push_str("\r\n");
-        self.writer.write_all(dbg!(&args).as_bytes()).await?;
+        self.writer.write_all(&args.as_bytes()).await?;
         Ok(())
     }
 
@@ -148,7 +148,7 @@ impl Connection {
         let mut output = String::new();
         self.reader.read_line(&mut output).await?;
 
-        if dbg!(&output).is_empty() {
+        if output.is_empty() {
             return Err(Error::ReceivedEmptyMessage);
         }
         if !output.ends_with("\r\n") {
